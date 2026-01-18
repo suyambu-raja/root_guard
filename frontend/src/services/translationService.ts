@@ -1,9 +1,19 @@
 import OpenAI from 'openai';
 
-const openai = new OpenAI({
-  apiKey: import.meta.env.VITE_OPENAI_API_KEY,
-  dangerouslyAllowBrowser: true // Note: In production, this should be handled by your backend
-});
+// Initialize OpenAI lazily or safely
+const getOpenAIClient = () => {
+  const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+  if (!apiKey || apiKey === 'undefined' || apiKey.includes('sk-proj-')) { // Basic check for dummy or missing key
+    if (!apiKey) console.warn('VITE_OPENAI_API_KEY is missing. AI translations will be disabled.');
+  }
+
+  return new OpenAI({
+    apiKey: apiKey || 'dummy-key', // Prevent constructor from throwing if possible
+    dangerouslyAllowBrowser: true
+  });
+};
+
+const openai = getOpenAIClient();
 
 export interface TranslationRequest {
   text: string;
@@ -16,14 +26,14 @@ export class TranslationService {
 
   static async translateText({ text, targetLanguage, context }: TranslationRequest): Promise<string> {
     const cacheKey = `${text}-${targetLanguage}-${context}`;
-    
+
     // Check cache first
     if (this.cache.has(cacheKey)) {
       return this.cache.get(cacheKey)!;
     }
 
     try {
-      const systemPrompt = targetLanguage === 'ta' 
+      const systemPrompt = targetLanguage === 'ta'
         ? `You are a professional translator specializing in agriculture and technology terms. Translate the given text from English to Tamil. Maintain technical accuracy and use appropriate Tamil terminology for agriculture and irrigation systems. ${context ? `Context: ${context}` : ''}`
         : `You are a professional translator specializing in agriculture and technology terms. Translate the given text from Tamil to English. Maintain technical accuracy and use appropriate English terminology for agriculture and irrigation systems. ${context ? `Context: ${context}` : ''}`;
 
@@ -35,7 +45,7 @@ export class TranslationService {
             content: systemPrompt
           },
           {
-            role: 'user', 
+            role: 'user',
             content: `Translate: "${text}"`
           }
         ],
@@ -44,10 +54,10 @@ export class TranslationService {
       });
 
       const translation = response.choices[0]?.message?.content?.trim() || text;
-      
+
       // Cache the translation
       this.cache.set(cacheKey, translation);
-      
+
       return translation;
     } catch (error) {
       console.error('Translation error:', error);
