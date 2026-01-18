@@ -74,28 +74,10 @@ class IrrigationService:
         # Handle irrigation session tracking
         session_id = None
         if not was_irrigating and new_irrigating:
-            # Starting irrigation - create new session
-            session = IrrigationSession(
-                mode=control.mode,
-                trigger_reason="Manual start" if control.mode == "manual" else f"Auto start ({control.mode} mode)"
-            )
-            self.db.add(session)
-            self.db.flush()  # Get the session ID
-            session_id = session.id
+            session_id = await self._start_session(control.mode)
         
         elif was_irrigating and not new_irrigating:
-            # Stopping irrigation - end current session
-            current_session = self.db.query(IrrigationSession).filter(
-                IrrigationSession.ended_at.is_(None)
-            ).order_by(desc(IrrigationSession.started_at)).first()
-            
-            if current_session:
-                current_session.ended_at = datetime.utcnow()
-                duration = (current_session.ended_at - current_session.started_at).total_seconds() / 60
-                current_session.duration_minutes = int(duration)
-                # Estimate water volume (rough calculation: 15L/min average flow)
-                current_session.estimated_volume_liters = round(duration * 15, 1)
-                session_id = current_session.id
+            session_id = await self._end_session()
         
         self.db.commit()
         self.db.refresh(control)
@@ -190,49 +172,51 @@ class IrrigationService:
             control.is_irrigating = True
             control.updated_at = datetime.utcnow()
             
+            # Start session tracking
+            session_id = await self._start_session(control.mode, reason or f"Auto start {control.mode}")
+            
             alert = Alert(
                 alert_type="info",
                 message=json.dumps({
                     "key": "alert_auto_irrigation_started", 
                     "params": {"reason_key": reason_key, "reason_params": reason_params}
                 }),
-                sensor_reading_id=sensor_reading.id
+                sensor_reading_id=sensor_reading.id,
+                irrigation_session_id=session_id
             )
             self.db.add(alert)
         
         elif not should_irrigate and control.is_irrigating and control.mode != "manual":
             # Stop irrigation if conditions no longer require it (except manual mode)
+            should_stop = False
             if control.mode == "normal" and sensor_reading.soil_moisture > 60:
+                should_stop = True
+                stop_alert_key = "alert_auto_irrigation_stopped"
+                stop_reason_key = "reason_moisture_sufficient"
+            
+            elif control.mode == "survival" and sensor_reading.soil_moisture > 35:
+                should_stop = True
+                stop_alert_key = "alert_survival_irrigation_stopped"
+                stop_reason_key = "reason_target_reached"
+
+            if should_stop:
                 control.is_irrigating = False
                 control.updated_at = datetime.utcnow()
+                
+                # End session tracking
+                session_id = await self._end_session()
                 
                 alert = Alert(
                     alert_type="info",
                     message=json.dumps({
-                        "key": "alert_auto_irrigation_stopped", 
+                        "key": stop_alert_key, 
                         "params": {
-                            "reason_key": "reason_moisture_sufficient", 
+                            "reason_key": stop_reason_key, 
                             "reason_params": {"moisture": sensor_reading.soil_moisture}
                         }
                     }),
-                    sensor_reading_id=sensor_reading.id
-                )
-                self.db.add(alert)
-            
-            elif control.mode == "survival" and sensor_reading.soil_moisture > 35:
-                control.is_irrigating = False
-                control.updated_at = datetime.utcnow()
-                
-                alert = Alert(
-                    alert_type="info",
-                    message=json.dumps({
-                        "key": "alert_survival_irrigation_stopped",
-                         "params": {
-                             "reason_key": "reason_target_reached", 
-                             "reason_params": {"moisture": sensor_reading.soil_moisture}
-                         }
-                    }),
-                    sensor_reading_id=sensor_reading.id
+                    sensor_reading_id=sensor_reading.id,
+                    irrigation_session_id=session_id
                 )
                 self.db.add(alert)
         
@@ -249,3 +233,31 @@ class IrrigationService:
             self.db.add(alert)
         
         self.db.commit()
+
+    async def _start_session(self, mode: str, reason: str = None) -> int:
+        """Helper to start an irrigation session"""
+        if not reason:
+            reason = "Manual start" if mode == "manual" else f"Auto start ({mode} mode)"
+            
+        session = IrrigationSession(
+            mode=mode,
+            trigger_reason=reason
+        )
+        self.db.add(session)
+        self.db.flush()
+        return session.id
+
+    async def _end_session(self) -> Optional[int]:
+        """Helper to end the current active irrigation session"""
+        current_session = self.db.query(IrrigationSession).filter(
+            IrrigationSession.ended_at.is_(None)
+        ).order_by(desc(IrrigationSession.started_at)).first()
+        
+        if current_session:
+            current_session.ended_at = datetime.utcnow()
+            duration = (current_session.ended_at - current_session.started_at).total_seconds() / 60
+            current_session.duration_minutes = int(duration)
+            # Estimate water volume (rough calculation: 15L/min average flow)
+            current_session.estimated_volume_liters = round(duration * 15, 1)
+            return current_session.id
+        return None

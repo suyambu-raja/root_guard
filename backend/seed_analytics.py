@@ -18,7 +18,7 @@ def seed_data():
         # 1. Ensure IrrigationControl exists
         control = db.query(IrrigationControl).first()
         if not control:
-            control = IrrigationControl(mode="normal", auto_mode=True)
+            control = IrrigationControl(mode="normal", auto_mode=True, is_irrigating=False)
             db.add(control)
         
         end_date = datetime.utcnow()
