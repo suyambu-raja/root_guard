@@ -1,5 +1,5 @@
 // src/services/api.ts
-const API_BASE_URL = 'http://127.0.0.1:8000';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://root-guard-2.onrender.com';
 
 export interface SensorData {
   water_level: number;

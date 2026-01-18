@@ -82,6 +82,7 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://127.0.0.1:8080",
         "http://127.0.0.1:8081",  # Added for new Vite port
+        "https://root-guardian.netlify.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],

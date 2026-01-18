@@ -21,7 +21,8 @@ export const ROIDashboard: React.FC = () => {
     const { data: costSavings, isLoading } = useQuery<CostSavings>({
         queryKey: ['costSavings'],
         queryFn: async () => {
-            const response = await fetch('http://127.0.0.1:8000/api/analytics/cost-savings?days=7');
+            const baseUrl = import.meta.env.VITE_API_URL || 'https://root-guard-2.onrender.com';
+            const response = await fetch(`${baseUrl}/api/analytics/cost-savings?days=7`);
             if (!response.ok) throw new Error('Failed to fetch cost savings');
             return response.json();
         },
